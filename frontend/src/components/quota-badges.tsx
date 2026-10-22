@@ -212,10 +212,15 @@ function getChannelPercentage(channel: ProviderQuotaChannel): number {
     percentage = Math.max(0, ...channel.quotaStatus.limits.map((limit) => limit.usageRatio * 100));
   } else if (isOllamaType(channel.type)) {
     const qd = channel.quotaStatus.quotaData as ProviderOllamaQuotaData | undefined;
-    percentage = Math.max(
+    const monthlyLimit = channel.quotaStatus.limits.find((limit) => limit.window === 'monthly');
+    const usage = Math.max(
+      (monthlyLimit?.usageRatio ?? 0) * 100,
       qd?.windows?.['5h']?.usage_percent ?? 0,
       qd?.windows?.weekly?.usage_percent ?? 0
     );
+    // Purchased credits remain usable after the included allowance runs out;
+    // keep the battery out of the exhausted state in that case.
+    percentage = (qd?.purchased?.balance_usd ?? 0) > 0 ? Math.min(usage, 94) : usage;
   } else if (isDeepSeekType(channel.type)) {
     percentage = Math.max(0, ...channel.quotaStatus.limits.map((limit) => limit.usageRatio * 100));
   } else if (isCommandCodeType(channel.type)) {
@@ -1272,38 +1277,113 @@ function QuotaRow({ channel, effectiveMode }: { channel: ProviderQuotaChannel; e
             const qd = channel.quotaStatus.quotaData as ProviderOllamaQuotaData | undefined;
             if (!qd) return null;
 
+            const items: React.ReactNode[] = [];
+            const formatUSD = (val: number | undefined) =>
+              t('currencies.format', {
+                val: val ?? 0,
+                currency: 'USD',
+                locale: i18n.language.startsWith('zh') ? 'zh-CN' : 'en-US',
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              });
+
+            const included = qd.included;
+            const monthlyLimit = quota.limits.find((limit) => limit.window === 'monthly');
+            if (included && typeof included.balance_usd === 'number' && typeof included.allowance_usd === 'number' && included.allowance_usd > 0) {
+              const usedPct = monthlyLimit
+                ? monthlyLimit.usageRatio * 100
+                : Math.max(0, Math.min(100, (1 - included.balance_usd / included.allowance_usd) * 100));
+              const resetAt = monthlyLimit?.nextResetAt ?? included.period?.until;
+              const resetText = resetAt ? formatTimeToReset(resetAt) : '';
+              const durationPct = monthlyLimit ? getLimitDurationPercent(monthlyLimit) : undefined;
+              items.push(
+                <div key='monthly' className='space-y-1.5'>
+                  <div className='flex items-center justify-between text-xs'>
+                    <span className='text-muted-foreground font-medium'>{t('quota.label.included_limit')}</span>
+                    <span className='text-foreground font-medium'>
+                      {formatUSD(included.balance_usd)} / {formatUSD(included.allowance_usd)}
+                    </span>
+                  </div>
+                  <UsageTimeBar
+                    usagePercent={usedPct}
+                    durationPercent={durationPct}
+                    tooltip={
+                      <div className='space-y-0.5'>
+                        <div className='font-medium'>{t('quota.label.included_limit')}</div>
+                        <div>
+                          {formatUSD(included.balance_usd)} / {formatUSD(included.allowance_usd)}
+                        </div>
+                        <div>{t('quota.label.percent_used', { percent: Math.round(usedPct) })}</div>
+                        {durationPct !== undefined && (
+                          <div>
+                            {t('quota.label.time_elapsed')}: {Math.round(durationPct)}%
+                          </div>
+                        )}
+                        {resetText && <div>{resetText}</div>}
+                      </div>
+                    }
+                  />
+                </div>
+              );
+            }
+
+            const purchased = qd.purchased?.balance_usd;
+            if (typeof purchased === 'number' && purchased > 0) {
+              items.push(
+                <div
+                  key='purchased'
+                  className={
+                    items.length > 0
+                      ? 'border-border/60 flex items-center justify-between border-t border-dashed pt-3 text-xs'
+                      : 'flex items-center justify-between text-xs'
+                  }
+                >
+                  <span className='text-muted-foreground font-medium'>{t('quota.label.credits_remaining')}</span>
+                  <span className='text-foreground font-medium'>{formatUSD(purchased)}</span>
+                </div>
+              );
+            }
+
             const entries: Array<['5h' | 'weekly', string]> = [
               ['5h', 'quota.window.5h'],
               ['weekly', 'quota.window.weekly'],
             ];
 
-            return entries
-              .map(([key, labelKey], index) => {
-                const window = qd.windows?.[key];
-                if (!window) return null;
+            entries.forEach(([key, labelKey]) => {
+              const window = qd.windows?.[key];
+              if (!window) return;
 
-                const usedPct = window.usage_percent ?? 0;
-                const resetText = window.reset_time ? formatTimeToReset(window.reset_time) : '';
-                return (
-                  <div key={key} className={index > 0 ? 'border-border/60 space-y-1.5 border-t border-dashed pt-3' : 'space-y-1.5'}>
-                    <div className='flex items-center justify-between text-xs'>
-                      <span className='text-muted-foreground font-medium'>{t(labelKey)}</span>
-                      <span className='text-foreground font-medium'>{t('quota.label.percent_used', { percent: Math.round(usedPct) })}</span>
-                    </div>
-                    <UsageTimeBar
-                      usagePercent={usedPct}
-                      tooltip={
-                        <div className='space-y-0.5'>
-                          <div className='font-medium'>{t(labelKey)}</div>
-                          <div>{t('quota.label.percent_used', { percent: Math.round(usedPct) })}</div>
-                          {resetText && <div>{resetText}</div>}
-                        </div>
-                      }
-                    />
+              const usedPct = window.usage_percent ?? 0;
+              const resetText = window.reset_time ? formatTimeToReset(window.reset_time) : '';
+              items.push(
+                <div key={key} className={items.length > 0 ? 'border-border/60 space-y-1.5 border-t border-dashed pt-3' : 'space-y-1.5'}>
+                  <div className='flex items-center justify-between text-xs'>
+                    <span className='text-muted-foreground font-medium'>{t(labelKey)}</span>
+                    <span className='text-foreground font-medium'>{t('quota.label.percent_used', { percent: Math.round(usedPct) })}</span>
                   </div>
-                );
-              })
-              .filter(Boolean);
+                  <UsageTimeBar
+                    usagePercent={usedPct}
+                    tooltip={
+                      <div className='space-y-0.5'>
+                        <div className='font-medium'>{t(labelKey)}</div>
+                        <div>{t('quota.label.percent_used', { percent: Math.round(usedPct) })}</div>
+                        {resetText && <div>{resetText}</div>}
+                      </div>
+                    }
+                  />
+                </div>
+              );
+            });
+
+            if (items.length === 0) {
+              items.push(
+                <div key='unavailable' className='bg-muted/40 text-muted-foreground rounded p-2 text-[11px]'>
+                  {t('quota.label.unavailable')}
+                </div>
+              );
+            }
+
+            return items;
           })()}
         </div>
       )}

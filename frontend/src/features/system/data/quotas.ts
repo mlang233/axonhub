@@ -494,11 +494,33 @@ export type OllamaQuotaWindow = {
   reset_time?: string;
 };
 
+export type OllamaLegacyBalanceLimit = {
+  remaining_percent?: number;
+  resets_at?: string;
+};
+
+export type OllamaIncludedBalance = {
+  balance_usd?: number;
+  allowance_usd?: number;
+  period?: {
+    from?: string;
+    until?: string;
+  } | null;
+  session?: OllamaLegacyBalanceLimit | null;
+  weekly?: OllamaLegacyBalanceLimit | null;
+};
+
+export type OllamaPurchasedBalance = {
+  balance_usd?: number;
+};
+
 export type ProviderOllamaQuotaData = ProviderQuotaDataCommon & {
   windows?: {
     '5h'?: OllamaQuotaWindow;
     weekly?: OllamaQuotaWindow;
   };
+  included?: OllamaIncludedBalance | null;
+  purchased?: OllamaPurchasedBalance | null;
 };
 
 /**

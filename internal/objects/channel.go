@@ -285,9 +285,11 @@ func (s CommandCodeQuotaSettings) String() string {
 	return "CommandCodeQuotaSettings{AuthCookie: <redacted>}"
 }
 
-// OllamaQuotaSettings holds the credentials used to query the Ollama Cloud
-// account quota. AuthCookie is the ollama.com Web session cookie (a
-// "__Secure-session=..." value) sent to the Plan & Billing settings page.
+// OllamaQuotaSettings holds the optional legacy credential used to query the
+// Ollama Cloud account quota. The official balance API normally uses the
+// channel API key; AuthCookie is the ollama.com Web session cookie (a
+// "__Secure-session=..." value) used only for legacy session/weekly plans or
+// when the API key is rejected.
 type OllamaQuotaSettings struct {
 	AuthCookie string `json:"authCookie,omitempty"`
 }

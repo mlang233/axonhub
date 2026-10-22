@@ -94,7 +94,7 @@ test('Codex reset can be attempted after a transient reset-list failure', () => 
   );
 });
 
-test('Ollama badge derives percentage from the heavier of the 5h/weekly windows', () => {
+test('Ollama badge derives percentage from the heavier of the monthly/5h/weekly windows', () => {
   const source = read('components/quota-badges.tsx');
   const start = source.indexOf('} else if (isOllamaType(channel.type)) {');
   const end = source.indexOf('} else if (', start + 5);
@@ -102,22 +102,46 @@ test('Ollama badge derives percentage from the heavier of the 5h/weekly windows'
 
   assert.match(
     percentBlock,
-    /Math\.max\(\s*qd\?\.windows\?\.\[['"]5h['"]\]\?\.usage_percent \?\? 0,\s*qd\?\.windows\?\.weekly\?\.usage_percent \?\? 0\s*\)/,
-    'ollama badge percentage should be the max of the 5h and weekly window usage'
+    /\(monthlyLimit\?\.usageRatio \?\? 0\) \* 100/,
+    'ollama badge percentage should include the official monthly allowance window'
+  );
+  assert.match(
+    percentBlock,
+    /qd\?\.windows\?\.\[['"]5h['"]\]\?\.usage_percent \?\? 0/,
+    'ollama badge percentage should still include legacy 5h usage'
+  );
+  assert.match(
+    percentBlock,
+    /qd\?\.windows\?\.weekly\?\.usage_percent \?\? 0/,
+    'ollama badge percentage should still include legacy weekly usage'
+  );
+  assert.match(
+    percentBlock,
+    /Math\.min\(usage, 94\)/,
+    'purchased credits should keep the Ollama battery out of the exhausted state'
   );
 });
 
-test('Ollama badge renders both the 5h and weekly windows with a reset countdown', () => {
+test('Ollama badge renders official included credits and legacy windows', () => {
   const source = read('components/quota-badges.tsx');
   const start = source.indexOf("{isOllamaType(channel.type) &&");
   const end = source.indexOf("{isCommandCodeType(channel.type) &&", start);
   const ollamaBlock = source.slice(start, end);
 
+  assert.match(ollamaBlock, /included\.balance_usd/);
+  assert.match(ollamaBlock, /included\.allowance_usd/);
+  assert.match(ollamaBlock, /quota\.label\.included_limit/);
+  assert.match(ollamaBlock, /getLimitDurationPercent\(monthlyLimit\)/);
+  assert.match(ollamaBlock, /qd\.purchased\?\.balance_usd/);
+  assert.match(ollamaBlock, /quota\.label\.credits_remaining/);
+
   assert.match(ollamaBlock, /QuotaWindow5h|'5h'/);
   assert.match(ollamaBlock, /'quota\.window\.5h'/);
   assert.match(ollamaBlock, /'quota\.window\.weekly'/);
   assert.match(ollamaBlock, /formatTimeToReset\(window\.reset_time\)/);
-  assert.doesNotMatch(ollamaBlock, /durationPercent/);
+
+  const legacyBlock = ollamaBlock.slice(ollamaBlock.indexOf('entries.forEach'));
+  assert.doesNotMatch(legacyBlock, /durationPercent/, 'legacy 5h/weekly windows should not show a time marker');
 });
 
 test('quota window identifiers resolve to localized labels', () => {

@@ -11,17 +11,14 @@ import (
 	"time"
 
 	"github.com/looplj/axonhub/internal/ent"
-	"github.com/looplj/axonhub/internal/ent/channel"
 	"github.com/looplj/axonhub/llm/httpclient"
 )
 
 const (
 	ollamaProviderType = "ollama"
-	// ollamaSettingsURL is the Plan & Billing page that carries the logged-in
-	// Ollama Cloud usage. There is no official usage/quota API today; the
-	// upstream feature request is tracked at
-	// https://github.com/ollama/ollama/issues/15132 (and #17451 / #15663), and
-	// this parser should migrate to the official endpoint when one ships.
+	// ollamaSettingsURL is the legacy Plan & Billing page that carries
+	// session/weekly usage. The official balance API is preferred; this page is
+	// retained as a fallback for legacy plans and rejected API keys.
 	ollamaSettingsURL  = "https://ollama.com/settings"
 	ollamaQuotaUA      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 	ollamaCookieName   = "__Secure-session"
@@ -47,22 +44,40 @@ func NewOllamaQuotaChecker(httpClient *httpclient.HttpClient) *OllamaQuotaChecke
 	}
 }
 
-// SupportsChannel reports whether the channel is an Ollama variant that has a
-// quota cookie configured.
+// SupportsChannel reports whether the channel is an Ollama variant with an
+// inference API key or a legacy quota cookie configured.
 func (c *OllamaQuotaChecker) SupportsChannel(ch *ent.Channel) bool {
-	if ch.Type != channel.TypeOllama && ch.Type != channel.TypeOllamaAnthropic {
-		return false
-	}
-	if ch.Settings == nil || ch.Settings.ProviderQuota == nil || ch.Settings.ProviderQuota.Ollama == nil {
-		return false
-	}
-	return strings.TrimSpace(ch.Settings.ProviderQuota.Ollama.AuthCookie) != ""
+	return HasOllamaQuotaCredentials(ch)
 }
 
-// CheckQuota fetches and parses Ollama Cloud usage for the channel. Non-2xx
-// responses surface as errors with their status code; expired cookies surface
-// as invalid credentials.
+// CheckQuota prefers the official account balance API with the channel API
+// key. It falls back to the legacy settings-page cookie scrape only when the
+// API key is rejected and a cookie is configured, so a network or server error
+// never silently switches credential paths.
 func (c *OllamaQuotaChecker) CheckQuota(ctx context.Context, ch *ent.Channel) (QuotaData, error) {
+	apiKey := ollamaAPIKey(ch)
+	if apiKey != "" {
+		quotaData, err := c.checkQuotaWithAPIKey(ctx, ch, apiKey)
+		if err == nil {
+			return quotaData, nil
+		}
+		if !errors.Is(err, ErrInvalidCredentials) || !ollamaHasCookie(ch) {
+			return QuotaData{}, err
+		}
+
+		return c.checkQuotaWithCookie(ctx, ch)
+	}
+
+	if ollamaHasCookie(ch) {
+		return c.checkQuotaWithCookie(ctx, ch)
+	}
+
+	return QuotaData{}, fmt.Errorf("%w: channel has no Ollama API key or quota cookie", ErrInvalidCredentials)
+}
+
+// checkQuotaWithCookie is the legacy path for session/weekly plans. It fetches
+// and parses the logged-in settings page with the __Secure-session cookie.
+func (c *OllamaQuotaChecker) checkQuotaWithCookie(ctx context.Context, ch *ent.Channel) (QuotaData, error) {
 	if ch.Settings == nil || ch.Settings.ProviderQuota == nil || ch.Settings.ProviderQuota.Ollama == nil {
 		return QuotaData{}, fmt.Errorf("%w: channel has no Ollama quota cookie", ErrInvalidCredentials)
 	}

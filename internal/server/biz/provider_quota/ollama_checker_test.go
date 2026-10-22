@@ -273,7 +273,7 @@ func TestOllama_SupportsChannel(t *testing.T) {
 	ch.Type = channel.TypeOpenai
 	require.False(t, checker.SupportsChannel(ch))
 
-	// Ollama channel with no cookie is unsupported.
+	// Ollama channel with neither an API key nor a cookie is unsupported.
 	require.False(t, checker.SupportsChannel(ollamaChannel("")))
 }
 

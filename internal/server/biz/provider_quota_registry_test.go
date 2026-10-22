@@ -86,7 +86,7 @@ func TestProviderQuotaService_RegistryCoverageMatrix(t *testing.T) {
 		if relation.checker == "ollama" {
 			quotaChannel.Settings = &objects.ChannelSettings{
 				ProviderQuota: &objects.ChannelProviderQuotaSettings{
-					Ollama: &objects.OllamaQuotaSettings{AuthCookie: "fixture-cookie"},
+					Ollama: &objects.OllamaQuotaSettings{AuthCookie: "__Secure-session=aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"},
 				},
 			}
 		}
